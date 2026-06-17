@@ -94,7 +94,9 @@ namespace QArray
   {
     switch (mMode)
     {
-    case kGPS:   
+    case kGPS: 
+    {
+      G4double randflat = G4UniformRand();  
       G4double theta, phi, energy;
       G4double dirTheta, dirPhi;
 
@@ -109,11 +111,12 @@ namespace QArray
         G4ThreeVector(std::sin(dirTheta) * std::cos(dirPhi), std::sin(dirTheta) * std::sin(dirPhi), std::cos(dirTheta));
 
       mParticleSource->GetCurrentSource()->GetAngDist()->SetParticleMomentumDirection(direction);
-      mParticleSource->SetParticleDefinition(fNeutron); //swapped to type being neutron from mu+, might need to double check
-      mParticleSource->SetParticleEnergy(5 * MeV); //I'm literally just guessing here, given you had a paper about being >1 MeV the area we wanted to look at, 1000 seemed really high but I have no ref.
+      //mParticleSource->SetParticleDefinition(fNeutron); //swapped to type being neutron from mu+, might need to double check
+      mParticleSource->GetCurrentSource()->GetEneDist()->SetMonoEnergy(5 * MeV); //particle source way of getting this to work.
     
       mParticleSource->GeneratePrimaryVertex(anEvent);
       break;
+    }
     case kParticleGun:
       // G4cout << "Current seed: " << G4Random::getTheSeed() << G4endl;
       InitCosmicParticleGun();
