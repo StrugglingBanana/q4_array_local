@@ -4,6 +4,7 @@
 #include "G4Run.hh"
 #include "G4Event.hh"
 #include "G4Track.hh"
+#include "G4Threading.hh" // Add this at the top of DataWriter.cpp if not present
 #include "G4UIcmdWithAString.hh"
 #include "G4UIcmdWithABool.hh"
 #include "G4UIcmdWithADoubleAndUnit.hh"
@@ -179,24 +180,31 @@ namespace QArray
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", localtime(&t));
     return buf;
   }
-  
+
 void DataWriter::RunStart(const G4Run *run, bool isMaster)
-  {
+{
+    // FORCE CHECK: If this isn't the master thread, exit immediately!
+    // Geant4's G4Threading::IsMasterThread() is a bulletproof global check.
+    if (!G4Threading::IsMasterThread())
+    {
+        return; 
+    }
+
+    //-------------------------------------------------------------
+    // Everything below here will ONLY be executed by the Master Thread
+    //-------------------------------------------------------------
     auto meta = Metadata::GetInstance();
     bEnabled = meta->Get<bool>("/QR/output/enable");
     if (!bEnabled)
       return;
 
     auto filetype = meta->GetString("/QR/output/filetype");
+    G4cout << "Output file type: " << filetype << G4endl;
 
-    if (isMaster)
-    {
-      G4cout << "Output file type: " << filetype << G4endl;
-      time_t starttime = time(0);
-      meta->Set("start_time", starttime);
-      meta->Set("start_time_string", timetostr(starttime));
-      meta->Set("runid", run->GetRunID());
-    }
+    time_t starttime = time(0);
+    meta->Set("start_time", starttime);
+    meta->Set("start_time_string", timetostr(starttime));
+    meta->Set("runid", run->GetRunID());
 
     fileName = meta->GetString("/QR/output/filename");
     if (run->GetRunID() > 0)
@@ -205,7 +213,6 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
       fileName += std::to_string(run->GetRunID());
     }
 
-    // Sanitize period characters out of the basename string
     {
       auto pos = fileName.find_last_of("/\\");
       auto start = (pos != G4String::npos) ? pos + 1 : 0;
@@ -214,62 +221,47 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
 
     auto AMan = G4AnalysisManager::Instance();
 
-    // STEP 1: Global state and Initial File Creation belongs ONLY to Master
-    if (isMaster)
-    {
-      if (filetype == "root") {
+    if (filetype == "root") {
         AMan->SetNtupleMerging(meta->Get<bool>("/QR/output/mergeNtuples"));
-      }
-      
-      // ONLY Open the file once, and let Geant4 handle extensions natively
-      G4cout << "DataWriter::RunStart opening file: " << fileName << G4endl;
-      if (!AMan->OpenFile(fileName))
-      {
-        G4ExceptionDescription msg;
-        msg << "Failed to open output file framework: " << fileName;
-        G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
-        return;
-      }
     }
 
-    // STEP 2: Structural parameters can be pulled by all threads
+    G4cout << "DataWriter::RunStart opening file " << fileName << "." << filetype << G4endl;
+    if (!AMan->OpenFile(fileName + "." + filetype))
+    {
+      G4ExceptionDescription msg;
+      msg << "Failed to open output file " << fileName << "." << filetype;
+      G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
+      return;
+    }
+
     HitData::bsWriteDecayAncestors = meta->Get<bool>("/QR/output/writeDecayAncestors");
     HitData::bsIncludeNonIonizingEdep = meta->Get<bool>("/QR/output/includeNonIonizingEdep");
+
     bWriteSteps = meta->Get<bool>("/QR/output/writeSteps");
     bWriteAllEvents = meta->Get<bool>("/QR/output/writeAllEvents");
     bSort = meta->Get<bool>("/QR/output/sort");
     _reducebytime::twindow = meta->Get<double>("/QR/output/timeWindow");
 
-    // STEP 3: Handle Ntuple registration safeties
     vecDetectors.clear();
     G4SDManager *sdm = G4SDManager::GetSDMpointer();
     G4HCtable *hctable = sdm->GetHCtable();
     int ntupleid;
-
+    
     for (int i = 0; i < hctable->entries(); ++i)
     {
       SensitiveDetector *det = (SensitiveDetector *)(sdm->FindSensitiveDetector(hctable->GetSDname(i)));
       if (!det || !det->isActive())
         continue;
-        
+      
       vecDetectors.push_back(det);
       G4String basename = det->GetName();
-
-      // Crucial change: G4AnalysisManager wants BOTH master and workers to script 
-      // identical definitions, but workers shouldn't output logs to clutter terminal.
-      if (isMaster) {
-         G4cout << "DataWriter::RunStart building ntuples for detector " << basename << G4endl;
-      }
-
+      G4cout << "DataWriter::RunStart building ntuples for detector " << basename << G4endl;
+      
       if (bWriteSteps || !det->IsReducible())
       {
-        // Only Master explicitly defines structural memory headers 
-        // Workers safely inherit these structures automatically in modern Geant4 MT frameworks
-        if (isMaster) {
-            ntupleid = AMan->CreateNtuple(basename, "Step-by-step energy deposition");
-            HitData::DefineNtuple(AMan, ntupleid, HitData::kFull);
-            AMan->FinishNtuple(ntupleid);
-        }
+        ntupleid = AMan->CreateNtuple(basename, "Step-by-step energy deposition");
+        HitData::DefineNtuple(AMan, ntupleid, HitData::kFull);
+        AMan->FinishNtuple(ntupleid);
       }
 
       if (!det->IsReducible())
@@ -279,52 +271,54 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
       {
         const G4String &name = name_reducer.first;
         const DataReducer &reducer = name_reducer.second;
-        if (isMaster) {
-            ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
-            HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
-            AMan->FinishNtuple(ntupleid);
-        }
+        ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
+        HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
+        AMan->FinishNtuple(ntupleid);
       }
     }
 
-    if (isMaster) {
-        G4cout << "DataWriter::RunStart " << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
-    }
-  }
+    G4cout << "DataWriter::RunStart " << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
+}
 
-  void DataWriter::RunEnd(const G4Run *run, bool isMaster)
+void DataWriter::RunEnd(const G4Run *run, bool isMaster)
   {
-    if (!bEnabled) // no-op
+    if (!bEnabled) 
       return;
+
+    // FORCE CHECK: Only the Master thread closes down and saves the files!
+    if (!G4Threading::IsMasterThread())
+    {
+        return;
+    }
 
     vecDetectors.clear();
     auto *AMan = G4AnalysisManager::Instance();
     G4String outfile = AMan->GetFileName();
     G4cout << "Closing output file " << outfile << G4endl;
+    
     AMan->Write();
     AMan->CloseFile();
+    
 #if G4VERSION_NUMBER >= 1100
-    AMan->Clear(); //< Resets the NtupleID
+    AMan->Clear(); 
 #endif
-    if (isMaster)
-    {
-      auto meta = Metadata::GetInstance();
-      time_t starttime = meta->Get<long>("start_time");
-      time_t endtime = time(0);
-      time_t duration = endtime - starttime;
-      G4cout << "Run completed in " << duration << " seconds." << G4endl;
-      meta->Set("end_time", endtime);
-      meta->Set("end_time_string", timetostr(endtime));
-      meta->Set("runtime_wall", duration);
-      meta->Set("nevents", run->GetNumberOfEvent()); // write out metadata
-      meta->SaveCommandHistory();
-      // write to a separate file
-      G4String metafile = fileName + ".json";
-      if (Metadata::GetInstance()->Write(metafile))
-        G4cout << "Metadata saved to " << metafile << G4endl;
-      else
-        G4cerr << "ERROR trying to save metadata to file " << metafile << G4endl;
-    }
+
+    auto meta = Metadata::GetInstance();
+    time_t starttime = meta->Get<long>("start_time");
+    time_t endtime = time(0);
+    time_t duration = endtime - starttime;
+    G4cout << "Run completed in " << duration << " seconds." << G4endl;
+    meta->Set("end_time", endtime);
+    meta->Set("end_time_string", timetostr(endtime));
+    meta->Set("runtime_wall", duration);
+    meta->Set("nevents", run->GetNumberOfEvent()); 
+    meta->SaveCommandHistory();
+    
+    G4String metafile = fileName + ".json";
+    if (Metadata::GetInstance()->Write(metafile))
+      G4cout << "Metadata saved to " << metafile << G4endl;
+    else
+      G4cerr << "ERROR trying to save metadata to file " << metafile << G4endl;
   }
 
   void DataWriter::EventStart(const G4Event *)
