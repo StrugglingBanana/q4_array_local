@@ -63,20 +63,28 @@ namespace QArray
 {
   typedef std::vector<G4PhysicalVolumesSearchScene::Findings> FindingsVector;
 
-  PrimaryGeneratorAction::PrimaryGeneratorAction()
-      : G4VUserPrimaryGeneratorAction()
-  {
-    //removed count as dynamic number of particles
-    mParticleSource = new G4GeneralParticleSource();
-    mParticleGun = new G4ParticleGun();
-    // I like this section, create a random unit vector, idk if I can loop/parallelize it to work several times
-    // GenerateThetaPhi(theta, phi, fThetaMin, fThetaMax);
-
-    G4ParticleTable *particleTable = G4ParticleTable::GetParticleTable();
-    G4String particleName;
-    G4ParticleDefinition *fGeantino = particleTable->FindParticle(particleName = "geantino"); //swapped type from mu+ using geant4 particletable, as you were prob using GAMOS hadronic physics list
+PrimaryGeneratorAction::PrimaryGeneratorAction()
+    : G4VUserPrimaryGeneratorAction(), 
+      mParticleSource(nullptr), 
+      mParticleGun(nullptr)
+{
+    if (mMode == kGPS) {
+        mParticleSource = new G4GeneralParticleSource();
+        
+        G4ParticleTable* particleTable = G4ParticleTable::GetParticleTable();
+        G4ParticleDefinition* geantino = particleTable->FindParticle("geantino");
+        
+        if (geantino && mParticleSource->GetCurrentSource()) {
+            mParticleSource->GetCurrentSource()->SetParticleDefinition(geantino);
+        }
     
+    } else if (mMode == kParticleGun) {
+        mParticleGun = new G4ParticleGun(1); 
+    }
     DefineCommands();
+}
+
+    
   }
 
   PrimaryGeneratorAction::~PrimaryGeneratorAction()

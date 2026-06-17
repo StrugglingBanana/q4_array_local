@@ -22,6 +22,13 @@ using namespace QArray;
 
 int main(int argc, char **argv)
 {
+  #ifdef G4MULTITHREADED
+  // If it's MT, check if it's crashing because of the GUI thread
+  auto* runManager = new G4RunManager; // Temporary force to Sequential for debugging
+  // auto* runManager = new G4MTRunManager; // Comment this out to test
+#else
+  auto* runManager = new G4RunManager;
+#endif
   // Detect interactive mode (if no arguments) and define UI session
   //
   G4UIExecutive *ui = nullptr;
