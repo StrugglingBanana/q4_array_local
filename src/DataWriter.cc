@@ -179,134 +179,97 @@ namespace QArray
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", localtime(&t));
     return buf;
   }
-
-  void DataWriter::RunStart(const G4Run *run, bool isMaster)
+  
+void DataWriter::RunStart(const G4Run *run, bool isMaster)
   {
-
-    // first see if we're enabled, if not don't do anything
     auto meta = Metadata::GetInstance();
     bEnabled = meta->Get<bool>("/QR/output/enable");
     if (!bEnabled)
       return;
 
-    // Check output filetype
     auto filetype = meta->GetString("/QR/output/filetype");
-    if (filetype == "csv")
-    {
-      G4cout << "Output file type: " << filetype << G4endl;
-    }
-    else if (filetype == "root")
-    {
-      G4cout << "Output file type: " << filetype << G4endl;
-    }
-    else if (filetype == "xml")
-    {
-      G4cout << "Output file type: " << filetype << G4endl;
-    }
-    else
-    {
-      G4ExceptionDescription msg;
-      msg << "Unknown output file type: " << filetype << "\n"
-          << "Choose from: csv, root, xml"
-          << G4endl;
-      G4Exception("DataWriter::RunStart", "QRCode001", FatalException, msg);
-    }
 
     if (isMaster)
     {
+      G4cout << "Output file type: " << filetype << G4endl;
       time_t starttime = time(0);
       meta->Set("start_time", starttime);
       meta->Set("start_time_string", timetostr(starttime));
       meta->Set("runid", run->GetRunID());
     }
-    // open the output file
+
     fileName = meta->GetString("/QR/output/filename");
-    // if (meta->Get<bool>("/QR/output/adduuid"))
-    // {
-    //   fFilename += "_";
-    //   fFilename += meta->GetString("uuid");
-    // }
-    auto AMan = G4AnalysisManager::Instance();
     if (run->GetRunID() > 0)
     {
       fileName += "_run";
       fileName += std::to_string(run->GetRunID());
     }
-    else
-    {
-      // Can only be set in the first run, and only applies to root
-      if (filetype == "root")
-        AMan->SetNtupleMerging(meta->Get<bool>("/QR/output/mergeNtuples"));
-#if G4VERSION_NUMBER >= 1060
-      AMan->SetNtupleRowWise(false, true);
-#elif G4VERSION_NUMBER >= 1050
-      AMan->SetNtupleRowWise(true);
-#endif
-    }
-    // analysis manager won't append extension if the filename has a period in it;
-    // only sanitize the basename part, not the directory path (preserve '..')
+
+    // Sanitize period characters out of the basename string
     {
       auto pos = fileName.find_last_of("/\\");
       auto start = (pos != G4String::npos) ? pos + 1 : 0;
       std::replace(fileName.begin() + start, fileName.end(), '.', '-');
     }
 
-    if (!AMan->OpenFile(fileName + "." + filetype))
+    auto AMan = G4AnalysisManager::Instance();
+
+    // STEP 1: Global state and Initial File Creation belongs ONLY to Master
+    if (isMaster)
     {
-      G4ExceptionDescription msg;
-      msg << "Failed to open output file " << fileName << "." << filetype;
-      G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
-      return;
+      if (filetype == "root") {
+        AMan->SetNtupleMerging(meta->Get<bool>("/QR/output/mergeNtuples"));
+      }
+      
+      // ONLY Open the file once, and let Geant4 handle extensions natively
+      G4cout << "DataWriter::RunStart opening file: " << fileName << G4endl;
+      if (!AMan->OpenFile(fileName))
+      {
+        G4ExceptionDescription msg;
+        msg << "Failed to open output file framework: " << fileName;
+        G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
+        return;
+      }
     }
-    // Prints out the file name
-    G4cout << "DataWriter::RunStart opening file " << fileName << G4endl;
-    // G4cout << "DataWriter::RunStart creating ntuples" << G4endl;
 
-    // create Ntuples
-    HitData::bsWriteDecayAncestors =
-        meta->Get<bool>("/QR/output/writeDecayAncestors");
-    HitData::bsIncludeNonIonizingEdep =
-        meta->Get<bool>("/QR/output/includeNonIonizingEdep");
-
+    // STEP 2: Structural parameters can be pulled by all threads
+    HitData::bsWriteDecayAncestors = meta->Get<bool>("/QR/output/writeDecayAncestors");
+    HitData::bsIncludeNonIonizingEdep = meta->Get<bool>("/QR/output/includeNonIonizingEdep");
     bWriteSteps = meta->Get<bool>("/QR/output/writeSteps");
     bWriteAllEvents = meta->Get<bool>("/QR/output/writeAllEvents");
     bSort = meta->Get<bool>("/QR/output/sort");
     _reducebytime::twindow = meta->Get<double>("/QR/output/timeWindow");
 
-    // todo: allow different reducers for different detectors
-
-    // use the SDManager to get the list of detectors
+    // STEP 3: Handle Ntuple registration safeties
     vecDetectors.clear();
     G4SDManager *sdm = G4SDManager::GetSDMpointer();
     G4HCtable *hctable = sdm->GetHCtable();
     int ntupleid;
+
     for (int i = 0; i < hctable->entries(); ++i)
     {
-      SensitiveDetector *det =
-          (SensitiveDetector *)(sdm->FindSensitiveDetector(hctable->GetSDname(i)));
+      SensitiveDetector *det = (SensitiveDetector *)(sdm->FindSensitiveDetector(hctable->GetSDname(i)));
       if (!det || !det->isActive())
         continue;
-      // store for quicker access later
+        
       vecDetectors.push_back(det);
       G4String basename = det->GetName();
-      G4cout << "DataWriter::RunStart building ntuples for detector " << basename
-             //<<"; local? "<<det->GetWriteLocalCoordinates()
-             //<<"; deep copy mult? "<<det->GetDeepCopyMultiplier()<<" "<<det->GetWriteDeepCopyNo()
-             << G4endl;
+
+      // Crucial change: G4AnalysisManager wants BOTH master and workers to script 
+      // identical definitions, but workers shouldn't output logs to clutter terminal.
+      if (isMaster) {
+         G4cout << "DataWriter::RunStart building ntuples for detector " << basename << G4endl;
+      }
+
       if (bWriteSteps || !det->IsReducible())
       {
-        const auto ntupleCount = AMan->GetNofNtuples();
-        ntupleid = AMan->CreateNtuple(basename,
-                                      "Step-by-step energy deposition");
-        HitData::DefineNtuple(AMan, ntupleid, HitData::kFull);
-        if (ntupleid < 0 || AMan->GetNofNtuples() != ntupleCount + 1)
-        {
-          G4ExceptionDescription msg;
-          msg << "Failed to create output ntuple " << basename;
-          G4Exception("DataWriter::RunStart", "QRCode003", FatalException, msg);
-          return;
+        // Only Master explicitly defines structural memory headers 
+        // Workers safely inherit these structures automatically in modern Geant4 MT frameworks
+        if (isMaster) {
+            ntupleid = AMan->CreateNtuple(basename, "Step-by-step energy deposition");
+            HitData::DefineNtuple(AMan, ntupleid, HitData::kFull);
+            AMan->FinishNtuple(ntupleid);
         }
-        // G4cout << "Current NtupleID: " << ntupleid << G4endl;
       }
 
       if (!det->IsReducible())
@@ -316,22 +279,17 @@ namespace QArray
       {
         const G4String &name = name_reducer.first;
         const DataReducer &reducer = name_reducer.second;
-        const auto ntupleCount = AMan->GetNofNtuples();
-        ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
-        HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
-        if (ntupleid < 0 || AMan->GetNofNtuples() != ntupleCount + 1)
-        {
-          G4ExceptionDescription msg;
-          msg << "Failed to create output ntuple " << basename << "_" << name;
-          G4Exception("DataWriter::RunStart", "QRCode003", FatalException, msg);
-          return;
+        if (isMaster) {
+            ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
+            HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
+            AMan->FinishNtuple(ntupleid);
         }
-        // G4cout << "Current NtupleID: " << ntupleid << G4endl;
       }
     }
 
-    G4cout << "DataWriter::RunStart " << AMan->GetNofNtuples()
-           << " ntuples are defined" << G4endl;
+    if (isMaster) {
+        G4cout << "DataWriter::RunStart " << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
+    }
   }
 
   void DataWriter::RunEnd(const G4Run *run, bool isMaster)

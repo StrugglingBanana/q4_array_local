@@ -60,32 +60,39 @@ namespace QArray
   }
 
   void RunAction::BeginOfRunAction(const G4Run *run)
-  {
+{
     if (isMaster)
     {
-      // load the random state from the uuid seed
-      // std::string uuidstr = Metadata::GetInstance()->GetString(seedkey);
-      // // parse and convert to a long array
-      // uuid_t uuidseed;
-      // uuid_parse(uuidstr.c_str(), uuidseed);
-      // G4Random::setTheSeeds((long *)uuidseed);
-
-      // save Rndm status
-      // G4RunManager::GetRunManager()->SetRandomNumberStore(false);
-      G4Random::showEngineStatus();
+        G4Random::showEngineStatus();
+        
+        // 1. Only the master thread should open the global file/stream!
+        if (mWriter) {
+            mWriter->RunStart(run, isMaster); 
+        }
+    }
+    else 
+    {
+        // 2. Worker threads must NOT call standard file-opening routines 
+        // unless your custom writer is specifically designed to create 
+        // thread-safe independent files (e.g., test_t0.csv).
+        
+        // If your mWriter uses G4AnalysisManager internally, it handles this.
+        // If it is entirely custom C++ (std::ofstream), you MUST handle thread isolation:
+        if (mWriter) {
+            // Option A: If your writer is built for MT, pass a thread ID
+            // Option B: Skip completely if the Master handles all writing globally via thread-safe buffers
+            mWriter->RunStartWorker(run); // Custom isolated worker setup
+        }
     }
 
-    // initialize primary generator
+    // Initialize primary generator (safe for both master/workers)
     if (mPGen)
-      mPGen->BeginOfRunAction();
+        mPGen->BeginOfRunAction();
 
 #ifdef QARRAY_DETECTOR_GEOMETRY_DSPX
     ConfigureDSPXScoring();
 #endif
-
-    // set up output data
-    mWriter->RunStart(run, isMaster);
-  }
+}
 
   void RunAction::EndOfRunAction(const G4Run *run)
   {
