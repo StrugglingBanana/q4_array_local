@@ -86,7 +86,7 @@ namespace QArray
 
     G4GenericMessenger *mMessenger = nullptr;
 
-    G4GeneralParticleSource *mGeneralParticleSource = nullptr;
+    G4GeneralParticleSource *mParticleSource = nullptr;
     G4ParticleGun *mParticleGun = nullptr;
     std::vector<G4ThreeVector> mVolumeScanPositions;
     G4RandGeneral *mRandGeneral = nullptr;
