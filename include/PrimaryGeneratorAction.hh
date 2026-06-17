@@ -52,7 +52,7 @@ namespace QArray
 
     G4GeneralParticleSource *GetGeneralParticleSource() const
     {
-      return mGeneralParticleSource;
+      return mParticleSource;
     };
 
     G4ParticleGun *GetParticleGun() const
