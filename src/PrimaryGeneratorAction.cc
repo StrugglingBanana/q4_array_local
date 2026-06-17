@@ -84,9 +84,6 @@ PrimaryGeneratorAction::PrimaryGeneratorAction()
     DefineCommands();
 }
 
-    
-  }
-
   PrimaryGeneratorAction::~PrimaryGeneratorAction()
   {
     delete mParticleSource;
@@ -776,5 +773,5 @@ PrimaryGeneratorAction::PrimaryGeneratorAction()
     guidance = "De-initialize Sampler (MUST be done after changing parameter range).";
 
 }
-
+}
 
