@@ -505,7 +505,7 @@ namespace QArray
     G4double N = 1. / 3. * (std::pow(std::cos(thetaMin), 3) - std::pow(std::cos(thetaMax), 3));
     G4double tmp = std::pow(std::cos(thetaMin), 3) - 3 * u * N;
     theta = std::acos(std::pow(tmp, 1. / 3.));
-    phi = GeneratePhi();
+    phi = G4UniformRand() * 2.0 * CLHEP::pi;
   }
 
   void GeneratePosition(G4ThreeVector &position, G4double sideL)
