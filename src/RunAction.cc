@@ -9,6 +9,7 @@
 #include "G4LogicalVolume.hh"
 #include "G4UnitsTable.hh"
 #include "G4SystemOfUnits.hh"
+#include "G4Threading.hh"  // For clean thread-logging if needed
 
 namespace QArray
 {
@@ -59,41 +60,45 @@ namespace QArray
     delete mWriter;
   }
 
-void RunAction::BeginOfRunAction(const G4Run *run)
-{
-  if (isMaster)
+  // =================================================================
+  // IMPLEMENTATION FIX: Let ALL threads pass through to mWriter
+  // =================================================================
+  void RunAction::BeginOfRunAction(const G4Run *run)
   {
-    G4Random::showEngineStatus();
-    
-    // Hard block: ONLY the master thread can initialize the data writer!
+    if (isMaster)
+    {
+      G4Random::showEngineStatus();
+    }
+    else 
+    {
+      G4cout << "G4WT" << G4Threading::G4GetThreadId() 
+             << " > Entering Worker RunAction Initialization." << G4endl;
+    }
+  
+    // REMOVED THE HARD BLOCK: 
+    // Both Master and Worker threads must invoke RunStart. Internal thread-safety
+    // inside DataWriter will handle splitting master-only configurations 
+    // from thread-local Ntuple bookings.
     if (mWriter) {
       mWriter->RunStart(run, isMaster);
     }
-  }
-  else 
-  {
-    // Worker threads completely skip the custom DataWriter file setup.
-    // Geant4's internal G4AnalysisManager handles worker data splitting automatically.
-    G4cout << "G4WT" << G4Threading::G4GetThreadId() << " > Skipping custom DataWriter setup." << G4endl;
-  }
 
-  // Initialize primary generator (safe for both master/workers)
-  if (mPGen)
-    mPGen->BeginOfRunAction();
+    // Initialize primary generator (safe for both master/workers)
+    if (mPGen)
+      mPGen->BeginOfRunAction();
 
 #ifdef QARRAY_DETECTOR_GEOMETRY_DSPX
-  ConfigureDSPXScoring();
+    ConfigureDSPXScoring();
 #endif
-}
+  }
 
-void RunAction::EndOfRunAction(const G4Run *run)
-{
-  if (isMaster)
+  void RunAction::EndOfRunAction(const G4Run *run)
   {
+    // REMOVED THE HARD BLOCK: 
+    // Both Master and Worker threads must invoke RunEnd so they can write out 
+    // and close down their respective thread-local data files (e.g. test_t0.csv).
     if (mWriter) {
       mWriter->RunEnd(run, isMaster);
     }
   }
-  // Workers safely exit without touching mWriter
-}
 }

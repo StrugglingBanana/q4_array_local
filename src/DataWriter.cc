@@ -183,65 +183,56 @@ namespace QArray
 
 void DataWriter::RunStart(const G4Run *run, bool isMaster)
 {
-    // FORCE CHECK: If this isn't the master thread, exit immediately!
-    // Geant4's G4Threading::IsMasterThread() is a bulletproof global check.
-    if (!G4Threading::IsMasterThread())
-    {
-        return; 
-    }
-
-    //-------------------------------------------------------------
-    // Everything below here will ONLY be executed by the Master Thread
-    //-------------------------------------------------------------
     auto meta = Metadata::GetInstance();
     bEnabled = meta->Get<bool>("/QR/output/enable");
     if (!bEnabled)
       return;
 
-    auto filetype = meta->GetString("/QR/output/filetype");
-    G4cout << "Output file type: " << filetype << G4endl;
-
-    time_t starttime = time(0);
-    meta->Set("start_time", starttime);
-    meta->Set("start_time_string", timetostr(starttime));
-    meta->Set("runid", run->GetRunID());
-
-    fileName = meta->GetString("/QR/output/filename");
-    if (run->GetRunID() > 0)
-    {
-      fileName += "_run";
-      fileName += std::to_string(run->GetRunID());
-    }
-
-    {
-      auto pos = fileName.find_last_of("/\\");
-      auto start = (pos != G4String::npos) ? pos + 1 : 0;
-      std::replace(fileName.begin() + start, fileName.end(), '.', '-');
-    }
-
     auto AMan = G4AnalysisManager::Instance();
 
-    if (filetype == "root") {
-        AMan->SetNtupleMerging(meta->Get<bool>("/QR/output/mergeNtuples"));
-    }
-
-    G4cout << "DataWriter::RunStart opening file " << fileName << "." << filetype << G4endl;
-    if (!AMan->OpenFile(fileName + "." + filetype))
+    // =================================================================
+    // PHASE 1: STRUCTURAL BLUEPRINT (Must be done by Master OR all threads)
+    // Geant4 requires Ntuple *creation* before OpenFile.
+    // =================================================================
+    if (G4Threading::IsMasterThread())
     {
-      G4ExceptionDescription msg;
-      msg << "Failed to open output file " << fileName << "." << filetype;
-      G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
-      return;
+        auto filetype = meta->GetString("/QR/output/filetype");
+        G4cout << "Output file type: " << filetype << G4endl;
+
+        time_t starttime = time(0);
+        meta->Set("start_time", starttime);
+        meta->Set("start_time_string", timetostr(starttime));
+        meta->Set("runid", run->GetRunID());
+
+        fileName = meta->GetString("/QR/output/filename");
+        if (run->GetRunID() > 0)
+        {
+          fileName += "_run";
+          fileName += std::to_string(run->GetRunID());
+        }
+
+        {
+          auto pos = fileName.find_last_of("/\\");
+          auto start = (pos != G4String::npos) ? pos + 1 : 0;
+          std::replace(fileName.begin() + start, fileName.end(), '.', '-');
+        }
+
+        if (filetype == "root") {
+            AMan->SetNtupleMerging(meta->Get<bool>("/QR/output/mergeNtuples"));
+        }
+
+        HitData::bsWriteDecayAncestors = meta->Get<bool>("/QR/output/writeDecayAncestors");
+        HitData::bsIncludeNonIonizingEdep = meta->Get<bool>("/QR/output/includeNonIonizingEdep");
+
+        bWriteSteps = meta->Get<bool>("/QR/output/writeSteps");
+        bWriteAllEvents = meta->Get<bool>("/QR/output/writeAllEvents");
+        bSort = meta->Get<bool>("/QR/output/sort");
+        _reducebytime::twindow = meta->Get<double>("/QR/output/timeWindow");
     }
 
-    HitData::bsWriteDecayAncestors = meta->Get<bool>("/QR/output/writeDecayAncestors");
-    HitData::bsIncludeNonIonizingEdep = meta->Get<bool>("/QR/output/includeNonIonizingEdep");
-
-    bWriteSteps = meta->Get<bool>("/QR/output/writeSteps");
-    bWriteAllEvents = meta->Get<bool>("/QR/output/writeAllEvents");
-    bSort = meta->Get<bool>("/QR/output/sort");
-    _reducebytime::twindow = meta->Get<double>("/QR/output/timeWindow");
-
+    // =================================================================
+    // PHASE 2: NTUPLE BOOKING (ALL threads must define identical structures)
+    // =================================================================
     vecDetectors.clear();
     G4SDManager *sdm = G4SDManager::GetSDMpointer();
     G4HCtable *hctable = sdm->GetHCtable();
@@ -255,7 +246,10 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
       
       vecDetectors.push_back(det);
       G4String basename = det->GetName();
-      G4cout << "DataWriter::RunStart building ntuples for detector " << basename << G4endl;
+      
+      if (G4Threading::IsMasterThread()) {
+          G4cout << "DataWriter::RunStart building ntuples for detector " << basename << G4endl;
+      }
       
       if (bWriteSteps || !det->IsReducible())
       {
@@ -277,25 +271,34 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
       }
     }
 
-    G4cout << "DataWriter::RunStart " << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
+    if (G4Threading::IsMasterThread()) {
+        G4cout << "DataWriter::RunStart " << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
+    }
+
+    // =================================================================
+    // PHASE 3: FILE OPENING (EVERY thread calls this independently)
+    // For CSV files, Geant4 will automatically append "_t0", "_t1" etc.
+    // =================================================================
+    auto filetype = meta->GetString("/QR/output/filetype");
+    G4String fullFileName = fileName + "." + filetype;
+    
+    if (!AMan->OpenFile(fullFileName))
+    {
+      G4ExceptionDescription msg;
+      msg << "Thread " << G4Threading::G4GetThreadId() << " failed to open output file " << fullFileName;
+      G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
+      return;
+    }
 }
 
 void DataWriter::RunEnd(const G4Run *run, bool isMaster)
-  {
+{
     if (!bEnabled) 
       return;
 
-    // FORCE CHECK: Only the Master thread closes down and saves the files!
-    if (!G4Threading::IsMasterThread())
-    {
-        return;
-    }
-
-    vecDetectors.clear();
     auto *AMan = G4AnalysisManager::Instance();
-    G4String outfile = AMan->GetFileName();
-    G4cout << "Closing output file " << outfile << G4endl;
     
+    // EVERY thread must write and close its own local buffers
     AMan->Write();
     AMan->CloseFile();
     
@@ -303,23 +306,28 @@ void DataWriter::RunEnd(const G4Run *run, bool isMaster)
     AMan->Clear(); 
 #endif
 
-    auto meta = Metadata::GetInstance();
-    time_t starttime = meta->Get<long>("start_time");
-    time_t endtime = time(0);
-    time_t duration = endtime - starttime;
-    G4cout << "Run completed in " << duration << " seconds." << G4endl;
-    meta->Set("end_time", endtime);
-    meta->Set("end_time_string", timetostr(endtime));
-    meta->Set("runtime_wall", duration);
-    meta->Set("nevents", run->GetNumberOfEvent()); 
-    meta->SaveCommandHistory();
-    
-    G4String metafile = fileName + ".json";
-    if (Metadata::GetInstance()->Write(metafile))
-      G4cout << "Metadata saved to " << metafile << G4endl;
-    else
-      G4cerr << "ERROR trying to save metadata to file " << metafile << G4endl;
-  }
+    // Only the master thread compiles the global runtime performance metadata
+    if (G4Threading::IsMasterThread())
+    {
+        vecDetectors.clear();
+        auto meta = Metadata::GetInstance();
+        time_t starttime = meta->Get<long>("start_time");
+        time_t endtime = time(0);
+        time_t duration = endtime - starttime;
+        G4cout << "Run completed in " << duration << " seconds." << G4endl;
+        meta->Set("end_time", endtime);
+        meta->Set("end_time_string", timetostr(endtime));
+        meta->Set("runtime_wall", duration);
+        meta->Set("nevents", run->GetNumberOfEvent()); 
+        meta->SaveCommandHistory();
+        
+        G4String metafile = fileName + ".json";
+        if (Metadata::GetInstance()->Write(metafile))
+          G4cout << "Metadata saved to " << metafile << G4endl;
+        else
+          G4cerr << "ERROR trying to save metadata to file " << metafile << G4endl;
+    }
+}
 
   void DataWriter::EventStart(const G4Event *)
   {
