@@ -97,7 +97,7 @@ namespace QArray
 
     MCSampler *mSampler = nullptr;
 
-    MODE mMode = kParticleGun;
+    MODE mMode = kGPS;
 #ifdef QR_WITH_CRY
     CRYGenerator *mCRYGen = nullptr;                // CRY cosmic particle generator
     std::vector<CRYParticle *> vecCRYParts; // hold particles from CRY

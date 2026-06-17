@@ -35,7 +35,7 @@
 /control/execute vis_2.mac
 
 # Particle Gun
-/QR/generator/mode particleGun
+/QR/generator/mode gps
 /QR/generator/sideL 0.05
 
 # CRY
