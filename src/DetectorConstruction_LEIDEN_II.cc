@@ -522,15 +522,15 @@ namespace QArray
     G4LogicalVolume *det1FoilLogical = new G4LogicalVolume(det1Foil,
                                                            aluminum,
                                                            "det1FoilLogical");
-    det1FoilLogical->SetVisAttributes(new G4VisAttributes(G4Colour::Gray));
+    det1FoilLogical->SetVisAttributes(new G4VisAttributes(G4Colour::Gray()));
     G4LogicalVolume *det2FoilLogical = new G4LogicalVolume(det2Foil,
                                                            aluminum,
                                                            "det2FoilLogical");
-    det2FoilLogical->SetVisAttributes(new G4VisAttributes(G4Colour::Gray));
+    det2FoilLogical->SetVisAttributes(new G4VisAttributes(G4Colour::Gray()));
     G4LogicalVolume *det3FoilLogical = new G4LogicalVolume(det3Foil,
                                                            aluminum,
                                                            "det3FoilLogical");
-    det3FoilLogical->SetVisAttributes(new G4VisAttributes(G4Colour::Gray));
+    det3FoilLogical->SetVisAttributes(new G4VisAttributes(G4Colour::Gray()));
 
     mDet1Logical = new G4LogicalVolume(det1Solid,
                                        scint,

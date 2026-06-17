@@ -775,6 +775,6 @@ PrimaryGeneratorAction::PrimaryGeneratorAction()
     G4GenericMessenger::Command &initSamplerCmd = mMessenger->DeclareMethod("deInitSampler", &PrimaryGeneratorAction::DeInitSampler);
     guidance = "De-initialize Sampler (MUST be done after changing parameter range).";
 
-  }
-
 }
+
+
