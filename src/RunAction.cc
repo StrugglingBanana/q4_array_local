@@ -59,53 +59,41 @@ namespace QArray
     delete mWriter;
   }
 
-  void RunAction::BeginOfRunAction(const G4Run *run)
+void RunAction::BeginOfRunAction(const G4Run *run)
 {
-    if (isMaster)
-    {
-        G4Random::showEngineStatus();
-        
-        // 1. Only the master thread should open the global file/stream!
-        if (mWriter) {
-            mWriter->RunStart(run, isMaster); 
-        }
+  if (isMaster)
+  {
+    G4Random::showEngineStatus();
+    
+    // Hard block: ONLY the master thread can initialize the data writer!
+    if (mWriter) {
+      mWriter->RunStart(run, isMaster);
     }
-    else 
-    {
-        // 2. Worker threads must NOT call standard file-opening routines 
-        // unless your custom writer is specifically designed to create 
-        // thread-safe independent files (e.g., test_t0.csv).
-        
-        // If your mWriter uses G4AnalysisManager internally, it handles this.
-        // If it is entirely custom C++ (std::ofstream), you MUST handle thread isolation:
-        if (mWriter) {
-            // Option A: If your writer is built for MT, pass a thread ID
-            // Option B: Skip completely if the Master handles all writing globally via thread-safe buffers
-            mWriter->RunStartWorker(run); // Custom isolated worker setup
-        }
-    }
+  }
+  else 
+  {
+    // Worker threads completely skip the custom DataWriter file setup.
+    // Geant4's internal G4AnalysisManager handles worker data splitting automatically.
+    G4cout << "G4WT" << G4Threading::G4GetThreadId() << " > Skipping custom DataWriter setup." << G4endl;
+  }
 
-    // Initialize primary generator (safe for both master/workers)
-    if (mPGen)
-        mPGen->BeginOfRunAction();
+  // Initialize primary generator (safe for both master/workers)
+  if (mPGen)
+    mPGen->BeginOfRunAction();
 
 #ifdef QARRAY_DETECTOR_GEOMETRY_DSPX
-    ConfigureDSPXScoring();
+  ConfigureDSPXScoring();
 #endif
 }
 
-  void RunAction::EndOfRunAction(const G4Run *run)
+void RunAction::EndOfRunAction(const G4Run *run)
+{
+  if (isMaster)
   {
-    // end primary generator
-    if (mPGen)
-      mPGen->EndOfRunAction();
-
-    // save output data
-    mWriter->RunEnd(run, isMaster);
-
-    // show Rndm status
-    if (isMaster)
-      G4Random::showEngineStatus();
+    if (mWriter) {
+      mWriter->RunEnd(run, isMaster);
+    }
   }
-
+  // Workers safely exit without touching mWriter
+}
 }

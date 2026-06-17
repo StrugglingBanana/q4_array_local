@@ -1,15 +1,3 @@
 /run/verbose 2
 /run/initialize
-/vis/scene/create
-/vis/open
-/vis/sceneHandler/create TSG
-/vis/sceneHandler/attach
-/vis/viewer/create ! ! 600x600-0+0
-/vis/viewer/refresh
-/vis/scene/notifyHandlers
-/vis/scene/endOfEventAction accumulate
-/vis/scene/add/trajectories smooth
-/tracking/storeTrajectory 2
-/vis/scene/notifyHandlers
-/run/beamOn 1
-/vis/scene/notifyHandlers scene-0
+/run/beamOn 5
