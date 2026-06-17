@@ -112,9 +112,11 @@ namespace QArray
         G4ThreeVector(std::sin(dirTheta) * std::cos(dirPhi), std::sin(dirTheta) * std::sin(dirPhi), std::cos(dirTheta));
 
       //mParticleSource->GetCurrentSource()->GetAngDist()->SetParticleMomentumDirection(direction);
-      mParticleSource->SetParticleMomentum(direction); //changed 
+      //mParticleSource->SetParticleMomentum(direction); //changed 
+      mParticleSource->GetSourceVector()[0]->GetAngDist()->SetParticleMomentumDirection(direction);
       //mParticleSource->GetCurrentSource()->GetEneDist()->SetMonoEnergy(5 * MeV); //particle source way of getting this to work.
-      mParticleSource->GetSource(0)->GetEneDist()->SetMonoEnergy(5 * MeV); //new version
+      //mParticleSource->GetSource(0)->GetEneDist()->SetMonoEnergy(5 * MeV); //new version
+      mParticleSource->GetSourceVector()[0]->GetEneDist()->SetMonoEnergy(5 * MeV);
       //mParticleSource->SetParticleEnergy(5 * MeV); //original again...
       mParticleSource->GeneratePrimaryVertex(anEvent);
       break;
