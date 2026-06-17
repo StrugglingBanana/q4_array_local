@@ -73,6 +73,7 @@ namespace QArray
     // Generate the energy for the particle following a predetermined distribution.
     // The predetermined distribution is Gaisser parametrization at 0 zenith angle.
     G4double GenerateEnergy();
+    G4double GeneratePhi();
 
     // Generate the theta and energy pair from MCSampler.
     void GenerateMCThetaEnergy(G4double &theta, G4double &energy);

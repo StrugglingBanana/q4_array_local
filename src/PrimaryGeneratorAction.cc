@@ -81,7 +81,7 @@ namespace QArray
 
   PrimaryGeneratorAction::~PrimaryGeneratorAction()
   {
-    delete mGeneralParticleSource;
+    delete mParticleSource;
     delete mParticleGun;
     delete mMessenger;
 #ifdef QR_WITH_CRY
@@ -488,7 +488,7 @@ namespace QArray
   }
 #endif
 
-  G4double GeneratePhi()
+  G4double PrimaryGeneratorAction::GeneratePhi()
   {
     return G4UniformRand() * 2. * M_PI;
   }
