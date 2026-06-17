@@ -103,6 +103,13 @@ namespace QArray
       if (mParticleSource->GetNumberofSource() == 0) {
           mParticleSource->AddaSource(1.0);
       }
+
+      G4SingleParticleSource* currentSource = mParticleSource->GetCurrentSource();
+      if (currentSource->GetParticleDefinition() == nullptr) {
+          G4ParticleTable* particleTable = G4ParticleTable::GetParticleTable();
+          currentSource->SetParticleDefinition(particleTable->FindParticle("geantino"));
+      }
+      
         // A point source shifted 5 centimeters along the Z-axis
       G4ThreeVector pointSourcePos = G4ThreeVector(0.*cm, 0.*cm, 5.*cm); //can specify exactly where I want the source here...
       //mParticleSource->GetCurrentSource()->GetPosDist()->SetCentreCoords(pointSourcePos);

@@ -66,13 +66,16 @@
 
 /QR/output/filename r1
 /random/setSeeds 148854 4824
+
+
+
 #/random/setSeeds 33 105
 #/QR/event/keepEvents [537]
-/run/beamOn 10
+#/run/beamOn 10
 
-#/gun/particle proton
+/gps/particle geantino
 #/random/setSeeds 124 2342
-#/run/beamOn 50
+/run/beamOn 50
 
 /vis/viewer/rebuild
 #/vis/ogl/export
