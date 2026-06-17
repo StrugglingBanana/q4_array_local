@@ -102,7 +102,8 @@ namespace QArray
 
         // A point source shifted 5 centimeters along the Z-axis
       G4ThreeVector pointSourcePos = G4ThreeVector(0.*cm, 0.*cm, 5.*cm); //can specify exactly where I want the source here...
-      mParticleSource->GetCurrentSource()->GetPosDist()->SetCentreCoords(pointSourcePos);
+      //mParticleSource->GetCurrentSource()->GetPosDist()->SetCentreCoords(pointSourcePos);
+      mParticleSource->SetParticlePosition(pointSourcePos); //swapped back to original code
       phi = GeneratePhi();
 
       dirTheta = std::acos(1-2*randflat);
@@ -110,10 +111,10 @@ namespace QArray
       G4ThreeVector direction =
         G4ThreeVector(std::sin(dirTheta) * std::cos(dirPhi), std::sin(dirTheta) * std::sin(dirPhi), std::cos(dirTheta));
 
-      mParticleSource->GetCurrentSource()->GetAngDist()->SetParticleMomentumDirection(direction);
-      //mParticleSource->SetParticleDefinition(fNeutron); //swapped to type being neutron from mu+, might need to double check
-      mParticleSource->GetCurrentSource()->GetEneDist()->SetMonoEnergy(5 * MeV); //particle source way of getting this to work.
-    
+      //mParticleSource->GetCurrentSource()->GetAngDist()->SetParticleMomentumDirection(direction);
+      mParticleSource->SetParticleMomentumDirection(direction); //og code again
+      //mParticleSource->GetCurrentSource()->GetEneDist()->SetMonoEnergy(5 * MeV); //particle source way of getting this to work.
+      mParticleSource->SetParticleEnergy(5 * MeV); //original again...
       mParticleSource->GeneratePrimaryVertex(anEvent);
       break;
     }
