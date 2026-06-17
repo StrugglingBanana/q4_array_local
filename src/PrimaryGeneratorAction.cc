@@ -74,7 +74,7 @@ namespace QArray
 
     G4ParticleTable *particleTable = G4ParticleTable::GetParticleTable();
     G4String particleName;
-    G4ParticleDefinition *fNeutron = particleTable->FindParticle(particleName = "neutron"); //swapped type from mu+ using geant4 particletable, as you were prob using GAMOS hadronic physics list
+    G4ParticleDefinition *fGeantino = particleTable->FindParticle(particleName = "geantino"); //swapped type from mu+ using geant4 particletable, as you were prob using GAMOS hadronic physics list
     
     DefineCommands();
   }
