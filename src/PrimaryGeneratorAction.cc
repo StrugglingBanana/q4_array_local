@@ -66,19 +66,55 @@ namespace QArray
   PrimaryGeneratorAction::PrimaryGeneratorAction()
       : G4VUserPrimaryGeneratorAction()
   {
-    G4int n_particle = 1;
-    mParticleGun = new G4ParticleGun(n_particle);
+    // G4int n_particle = 1;
+    // mParticleGun = new G4ParticleGun(n_particle); //commited these out to see if I can just get a neutron source.
 
     // Default particle kinematics
+    // G4ParticleTable *particleTable = G4ParticleTable::GetParticleTable(); //removed these also as for gun not for the source
+    // G4String particleName;
+    // G4ParticleDefinition *fNeutron = particleTable->FindParticle(particleName = "neutron"); //swapped type from mu+ using geant4 particletable, as you were prob using GAMOS hadronic physics list
+    // mParticleGun->SetParticleDefinition(fNeutron); //swapped to type being neutron from mu+, might need to double check
+    // mParticleGun->SetParticleEnergy(5 * MeV); //I'm literally just guessing here, given you had a paper about being >1 MeV the area we wanted to look at, 1000 seemed really high but I have no ref.
+
+
+    G4int n_particle_source = 1;
+    mParticleSource = new G4GeneralParticleSource(n_particle_source);
+
+    //mParticleSource = new G4GeneralParticleSource(); //duplicant
+    //mSampler = new MCSampler();
+
+    G4double theta, phi, energy;
+    G4double dirTheta, dirPhi;
+
+    // A point source shifted 5 centimeters along the Z-axis
+    G4ThreeVector pointSourcePos = G4ThreeVector(0.*cm, 0.*cm, 5.*cm); //can specify exactly where I want the source here...
+    mParticleSource->SetParticlePosition(pointSourcePos);
+
+    // I like this section, create a random unit vector, idk if I can loop/parallelize it to work several times
+    // GenerateThetaPhi(theta, phi, fThetaMin, fThetaMax);
+    phi = GeneratePhi();
+
+    //GenerateMCThetaEnergy(theta, energy); // I'm removing this for now as it give I believe a random between range energy spread which I don't really want.
+    // G4cout << "Theta: " << theta << G4endl;
+    // G4cout << "Phi: " << phi << G4endl;
+    dirTheta = std::acos(1-2*randflat);
+    dirPhi = phi;
+    G4ThreeVector direction =
+        G4ThreeVector(std::sin(dirTheta) * std::cos(dirPhi), std::sin(dirTheta) * std::sin(dirPhi), std::cos(dirTheta));
+
+    // I like all above, creates random direction unit vector in sphere.
+
+    //mParticleSource->SetParticlePosition(position); already defined above
+    
+
     G4ParticleTable *particleTable = G4ParticleTable::GetParticleTable();
     G4String particleName;
-    G4ParticleDefinition *fMuon = particleTable->FindParticle(particleName = "mu+");
-    mParticleGun->SetParticleDefinition(fMuon);
-    mParticleGun->SetParticleEnergy(1000. * MeV);
-
-    mGeneralParticleSource = new G4GeneralParticleSource();
-    mSampler = new MCSampler();
-
+    G4ParticleDefinition *fNeutron = particleTable->FindParticle(particleName = "neutron"); //swapped type from mu+ using geant4 particletable, as you were prob using GAMOS hadronic physics list
+    
+    mParticleSource->SetParticleMomentumDirection(direction);
+    mParticleSource->SetParticleDefinition(fNeutron); //swapped to type being neutron from mu+, might need to double check
+    mParticleSource->SetParticleEnergy(5 * MeV); //I'm literally just guessing here, given you had a paper about being >1 MeV the area we wanted to look at, 1000 seemed really high but I have no ref.
+    
     DefineCommands();
   }
 
