@@ -68,7 +68,7 @@ namespace QArray
   {
     //removed count as dynamic number of particles
     mParticleSource = new G4GeneralParticleSource();
-
+    mParticleGun = new G4ParticleGun();
     // I like this section, create a random unit vector, idk if I can loop/parallelize it to work several times
     // GenerateThetaPhi(theta, phi, fThetaMin, fThetaMax);
 
@@ -107,9 +107,20 @@ namespace QArray
       G4SingleParticleSource* currentSource = mParticleSource->GetCurrentSource();
       if (currentSource->GetParticleDefinition() == nullptr) {
           G4ParticleTable* particleTable = G4ParticleTable::GetParticleTable();
-          currentSource->SetParticleDefinition(particleTable->FindParticle("geantino"));
+          G4ParticleDefinition* particle = particleTable->FindParticle("geantino");
+          
+          if (!particle) {
+              particle = particleTable->FindParticle("gamma"); 
+          }
+          
+          if (particle) {
+              currentSource->SetParticleDefinition(particle);
+          } else {
+              G4cerr << "CRITICAL ERROR: No particles found in Geant4 Table!" << G4endl;
+              break; 
+          }
       }
-      
+
         // A point source shifted 5 centimeters along the Z-axis
       G4ThreeVector pointSourcePos = G4ThreeVector(0.*cm, 0.*cm, 5.*cm); //can specify exactly where I want the source here...
       //mParticleSource->GetCurrentSource()->GetPosDist()->SetCentreCoords(pointSourcePos);
