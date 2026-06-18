@@ -180,168 +180,169 @@ namespace QArray
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", localtime(&t));
     return buf;
   }
+  void DataWriter::RunStart(const G4Run *run, bool isMaster)
+  {
+      auto meta = Metadata::GetInstance();
+      
+      // Fallback safe metadata reading for critical enablement flag
+      try {
+          bEnabled = meta->Get<bool>("/QR/output/enable");
+      } catch (...) {
+          bEnabled = true; 
+      }
+      
+      if (!bEnabled)
+          return;
+
+      auto AMan = G4AnalysisManager::Instance();
+
+      // =================================================================
+      // PHASE 1: GLOBAL VS. THREAD-LOCAL CONFIGURATION
+      // =================================================================
+      
+      // Purely Global Actions (STAYS MASTER ONLY)
+      if (G4Threading::IsMasterThread() || isMaster)
+      {
+          G4String filetype = "csv";
+          try {
+              filetype = meta->GetString("/QR/output/filetype");
+          } catch (...) {}
+          
+          G4cout << "Output file type: " << filetype << G4endl;
+
+          time_t starttime = time(0);
+          meta->Set("start_time", starttime);
+          meta->Set("start_time_string", timetostr(starttime));
+          meta->Set("runid", run->GetRunID());
+
+          if (filetype == "root") {
+              bool merge = false;
+              try {
+                  merge = meta->Get<bool>("/QR/output/mergeNtuples");
+              } catch (...) {}
+              AMan->SetNtupleMerging(merge);
+          }
+      }
+
+      // Shared Configurations (ALL THREADS MUST EXECUTE THIS WITH EXCEPTION SAFETY)
+      try {
+          fileName = meta->GetString("/QR/output/filename");
+      } catch (...) {
+          fileName = "output";
+      }
+
+      if (run->GetRunID() > 0)
+      {
+          fileName += "_run";
+          fileName += std::to_string(run->GetRunID());
+      }
+
+      {
+          auto pos = fileName.find_last_of("/\\");
+          auto start = (pos != G4String::npos) ? pos + 1 : 0;
+          std::replace(fileName.begin() + start, fileName.end(), '.', '-');
+      }
+
+      try {
+          HitData::bsWriteDecayAncestors = meta->Get<bool>("/QR/output/writeDecayAncestors");
+      } catch (...) { HitData::bsWriteDecayAncestors = true; }
+
+      try {
+          HitData::bsIncludeNonIonizingEdep = meta->Get<bool>("/QR/output/includeNonIonizingEdep");
+      } catch (...) { HitData::bsIncludeNonIonizingEdep = false; }
+
+      try {
+          bWriteSteps = meta->Get<bool>("/QR/output/writeSteps");
+      } catch (...) { bWriteSteps = true; }
+
+      try {
+          bWriteAllEvents = meta->Get<bool>("/QR/output/writeAllEvents");
+      } catch (...) { bWriteAllEvents = false; }
+
+      try {
+          bSort = meta->Get<bool>("/QR/output/sort");
+      } catch (...) { bSort = true; }
+
+      try {
+          _reducebytime::twindow = meta->Get<double>("/QR/output/timeWindow");
+      } catch (...) { _reducebytime::twindow = 10.0; }
+
+      // =================================================================
+      // PHASE 2: NTUPLE BOOKING (Robust Master-driven structure definition)
+      // =================================================================
+      vecDetectors.clear();
+      G4SDManager *sdm = G4SDManager::GetSDMpointer();
+      G4HCtable *hctable = sdm->GetHCtable();
+      
+      // In Geant4 MT, Ntuples must be defined on both master and workers.
+      if (hctable && hctable->entries() > 0)
+      {
+          for (int i = 0; i < hctable->entries(); ++i)
+          {
+              SensitiveDetector *det = (SensitiveDetector *)(sdm->FindSensitiveDetector(hctable->GetSDname(i)));
+              if (!det || !det->isActive())
+                  continue;
+              
+              vecDetectors.push_back(det);
+              G4String basename = det->GetName();
+              
+              if (!det->IsReducible())
+                  continue;
+
+              for (auto &name_reducer : mReducers)
+              {
+                  const G4String &name = name_reducer.first;
+                  const DataReducer &reducer = name_reducer.second;
+                  
+                  int ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
+                  HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
+                  AMan->FinishNtuple(ntupleid);
+              }
+          }
+      }
+      else
+      {
+          // WORKER THREAD FALLBACK: Replicate the identical Ntuple structure sequence
+          std::vector<G4String> workerBasenames = {"scint_I", "scint_II", "scint_III", "chip"};
+          
+          for (const auto& basename : workerBasenames)
+          {
+              for (auto &name_reducer : mReducers)
+              {
+                  const G4String &name = name_reducer.first;
+                  const DataReducer &reducer = name_reducer.second;
+                  
+                  int ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
+                  HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
+                  AMan->FinishNtuple(ntupleid);
+              }
+          }
+      }
+
+      // VERIFICATION PRINT: Reverted back to your working GetNofNtuples()
+      G4cout << "Thread [" << G4Threading::G4GetThreadId() << "] DataWriter::RunStart: " 
+            << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
+
+      // =================================================================
+      // PHASE 3: FILE OPENING (EVERY thread calls this independently)
+      // =================================================================
+      G4String filetype = "csv";
+      try {
+          filetype = meta->GetString("/QR/output/filetype");
+      } catch (...) {}
+      
+      G4String fullFileName = fileName + "." + filetype;
+      
+      if (!AMan->OpenFile(fullFileName))
+      {
+          G4ExceptionDescription msg;
+          msg << "Thread " << G4Threading::G4GetThreadId() << " failed to open output file " << fullFileName;
+          G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
+          return;
+      }
+  }
   
-void DataWriter::RunStart(const G4Run *run, bool isMaster)
-{
-    auto meta = Metadata::GetInstance();
-    
-    // Fallback safe metadata reading for critical enablement flag
-    try {
-        bEnabled = meta->Has("/QR/output/enable") ? meta->Get<bool>("/QR/output/enable") : true;
-    } catch (...) {
-        bEnabled = true; 
-    }
-    
-    if (!bEnabled)
-        return;
-
-    auto AMan = G4AnalysisManager::Instance();
-
-    // =================================================================
-    // PHASE 1: GLOBAL VS. THREAD-LOCAL CONFIGURATION
-    // =================================================================
-    
-    // Purely Global Actions (STAYS MASTER ONLY)
-    if (G4Threading::IsMasterThread() || isMaster)
-    {
-        G4String filetype = "csv";
-        try {
-            filetype = meta->Has("/QR/output/filetype") ? meta->GetString("/QR/output/filetype") : "csv";
-        } catch (...) {}
-        
-        G4cout << "Output file type: " << filetype << G4endl;
-
-        time_t starttime = time(0);
-        meta->Set("start_time", starttime);
-        meta->Set("start_time_string", timetostr(starttime));
-        meta->Set("runid", run->GetRunID());
-
-        if (filetype == "root") {
-            bool merge = false;
-            try {
-                merge = meta->Has("/QR/output/mergeNtuples") ? meta->Get<bool>("/QR/output/mergeNtuples") : false;
-            } catch (...) {}
-            AMan->SetNtupleMerging(merge);
-        }
-    }
-
-    // Shared Configurations (ALL THREADS MUST EXECUTE THIS WITH EXCEPTION SAFETY)
-    try {
-        fileName = meta->Has("/QR/output/filename") ? meta->GetString("/QR/output/filename") : "output";
-    } catch (...) {
-        fileName = "output";
-    }
-
-    if (run->GetRunID() > 0)
-    {
-        fileName += "_run";
-        fileName += std::to_string(run->GetRunID());
-    }
-
-    {
-        auto pos = fileName.find_last_of("/\\");
-        auto start = (pos != G4String::npos) ? pos + 1 : 0;
-        std::replace(fileName.begin() + start, fileName.end(), '.', '-');
-    }
-
-    try {
-        HitData::bsWriteDecayAncestors = meta->Has("/QR/output/writeDecayAncestors") ? meta->Get<bool>("/QR/output/writeDecayAncestors") : true;
-        HitData::bsIncludeNonIonizingEdep = meta->Has("/QR/output/includeNonIonizingEdep") ? meta->Get<bool>("/QR/output/includeNonIonizingEdep") : false;
-        bWriteSteps = meta->Has("/QR/output/writeSteps") ? meta->Get<bool>("/QR/output/writeSteps") : true;
-        bWriteAllEvents = meta->Has("/QR/output/writeAllEvents") ? meta->Get<bool>("/QR/output/writeAllEvents") : false;
-        bSort = meta->Has("/QR/output/sort") ? meta->Get<bool>("/QR/output/sort") : true;
-        _reducebytime::twindow = meta->Has("/QR/output/timeWindow") ? meta->Get<double>("/QR/output/timeWindow") : 10.0;
-    } catch (...) {
-        // Safe hardcoded backups to keep loops running
-        HitData::bsWriteDecayAncestors = true;
-        HitData::bsIncludeNonIonizingEdep = false;
-        bWriteSteps = true;
-        bWriteAllEvents = false;
-        bSort = true;
-        _reducebytime::twindow = 10.0;
-    }
-
-    // =================================================================
-    // PHASE 2: NTUPLE BOOKING (Robust Master-driven structure definition)
-    // =================================================================
-    vecDetectors.clear();
-    G4SDManager *sdm = G4SDManager::GetSDMpointer();
-    G4HCtable *hctable = sdm->GetHCtable();
-    
-    // In Geant4 MT, Ntuples must be defined on both master and workers.
-    // However, workers do not have access to hctable details directly. 
-    // We check if hctable is valid and populated (Master thread or sequential mode).
-    if (hctable && hctable->entries() > 0)
-    {
-        for (int i = 0; i < hctable->entries(); ++i)
-        {
-            SensitiveDetector *det = (SensitiveDetector *)(sdm->FindSensitiveDetector(hctable->GetSDname(i)));
-            if (!det || !det->isActive())
-                continue;
-            
-            vecDetectors.push_back(det);
-            G4String basename = det->GetName();
-            
-            if (!det->IsReducible())
-                continue;
-
-            for (auto &name_reducer : mReducers)
-            {
-                const G4String &name = name_reducer.first;
-                const DataReducer &reducer = name_reducer.second;
-                
-                // Only build if the Analysis Manager does not have these booked yet
-                int ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
-                HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
-                AMan->FinishNtuple(ntupleid);
-            }
-        }
-    }
-    else
-    {
-        // WORKER THREAD FALLBACK: If hctable is invisible on this thread,
-        // we replicate the exact identical Ntuple structure sequence.
-        // Hardcode your 4 visual detectors safely here to match your setup structure:
-        std::vector<G4String> workerBasenames = {"scint_I", "scint_II", "scint_III", "chip"};
-        
-        for (const auto& basename : workerBasenames)
-        {
-            for (auto &name_reducer : mReducers)
-            {
-                const G4String &name = name_reducer.first;
-                const DataReducer &reducer = name_reducer.second;
-                
-                int ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
-                HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
-                AMan->FinishNtuple(ntupleid);
-            }
-        }
-    }
-
-    // VERIFICATION PRINT: Replaced GetNofNtuples() with standard valid GetNtupleCounter()
-    G4cout << "Thread [" << G4Threading::G4GetThreadId() << "] DataWriter::RunStart: " 
-           << AMan->GetNtupleCounter() << " ntuples are defined" << G4endl;
-
-    // =================================================================
-    // PHASE 3: FILE OPENING (EVERY thread calls this independently)
-    // =================================================================
-    G4String filetype = "csv";
-    try {
-        filetype = meta->Has("/QR/output/filetype") ? meta->GetString("/QR/output/filetype") : "csv";
-    } catch (...) {}
-    
-    G4String fullFileName = fileName + "." + filetype;
-    
-    if (!AMan->OpenFile(fullFileName))
-    {
-        G4ExceptionDescription msg;
-        msg << "Thread " << G4Threading::G4GetThreadId() << " failed to open output file " << fullFileName;
-        G4Exception("DataWriter::RunStart", "QRCode002", FatalException, msg);
-        return;
-    }
-}
-
-void DataWriter::RunEnd(const G4Run *run, bool isMaster)
+  void DataWriter::RunEnd(const G4Run *run, bool isMaster)
 {
     if (!bEnabled) 
       return;
