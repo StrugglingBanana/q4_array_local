@@ -77,47 +77,59 @@ int main(int argc, char **argv)
     G4String fileName = argv[1];
     UImanager->ApplyCommand(command + fileName);
   }
-  else
-  {
-    // Interactive mode execution with modern path validation
-    fs::path macroPath = "init_vis.mac";
-    
-    // Check multiple relative layout targets dynamically
-    if (!fs::exists(macroPath))
+    else
     {
-      if (fs::exists("../init_vis.mac"))
+      // Interactive mode execution with hyper-robust path validation
+      fs::path macroPath = "init_vis.mac";
+      
+      // Determine where the actual compiled binary lives
+      fs::path exeDir = fs::absolute(argv[0]).parent_path();
+
+      // Strategy 1: Check Current Working Directory (where your terminal is sitting)
+      if (!fs::exists(macroPath))
       {
-        macroPath = "../init_vis.mac";
+        // Strategy 2: Check the directory where the binary lives (e.g., build/)
+        if (fs::exists(exeDir / "init_vis.mac"))
+        {
+          macroPath = exeDir / "init_vis.mac";
+        }
+        // Strategy 3: Check the parent of the binary directory (the repo root)
+        else if (fs::exists(exeDir.parent_path() / "init_vis.mac"))
+        {
+          macroPath = exeDir.parent_path() / "init_vis.mac";
+        }
+        // Strategy 4: Classic relative fallback
+        else if (fs::exists("../init_vis.mac"))
+        {
+          macroPath = "../init_vis.mac";
+        }
+        else
+        {
+          // Absolute Guardrail: Kill the run before workers spawn with 0 ntuples
+          G4cerr << "\n========================================================="
+                << "\n [CRITICAL ERROR] Cannot locate 'init_vis.mac'!"
+                << "\n Checked standard paths relative to execution location:"
+                << "\n 1. " << fs::current_path() / "init_vis.mac"
+                << "\n 2. " << exeDir / "init_vis.mac"
+                << "\n 3. " << exeDir.parent_path() / "init_vis.mac"
+                << "\n\n Please ensure init_vis.mac is in your repository root."
+                << "\n========================================================= \n" << G4endl;
+          
+          delete ui;
+          delete visManager;
+          delete runManager;
+          return 1; // Safe exit code
+        }
       }
-      else if (fs::exists("build/init_vis.mac"))
-      {
-        macroPath = "build/init_vis.mac";
-      }
-      else
-      {
-        // Safe Hard Stop: Prevent cascading zero-ntuple worker segmentation faults
-        G4cerr << "\n========================================================="
-               << "\n [CRITICAL ERROR] Cannot locate 'init_vis.mac'!"
-               << "\n Current Working Directory: " << fs::current_path()
-               << "\n Please ensure the macro exists in the execution path."
-               << "\n=========================================================\n" << G4endl;
-        
-        // Resource cleanup before exiting
-        delete ui;
-        delete visManager;
-        delete runManager;
-        return 1;
-      }
+
+      G4cout << "\n[INFO] Successfully located macro at: " << fs::absolute(macroPath) << G4endl;
+
+      // Execute the valid path BEFORE the thread states lock
+      UImanager->ApplyCommand("/control/execute " + macroPath.string());
+      
+      ui->SessionStart();
+      delete ui;
     }
-
-    G4cout << "[INFO] Safely resolved macro path to: " << fs::absolute(macroPath) << G4endl;
-
-    // Execute the guaranteed correct path BEFORE the thread states lock
-    UImanager->ApplyCommand("/control/execute " + macroPath.string());
-    
-    ui->SessionStart();
-    delete ui;
-  }
 
   // Job termination
   delete visManager;
