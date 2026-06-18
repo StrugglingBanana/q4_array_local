@@ -180,7 +180,6 @@ namespace QArray
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S %Z", localtime(&t));
     return buf;
   }
-
 void DataWriter::RunStart(const G4Run *run, bool isMaster)
 {
     auto meta = Metadata::GetInstance();
@@ -191,9 +190,10 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
     auto AMan = G4AnalysisManager::Instance();
 
     // =================================================================
-    // PHASE 1: STRUCTURAL BLUEPRINT (Must be done by Master OR all threads)
-    // Geant4 requires Ntuple *creation* before OpenFile.
+    // PHASE 1: GLOBAL VS. THREAD-LOCAL CONFIGURATION
     // =================================================================
+    
+    // Purely Global Actions (STAYS MASTER ONLY)
     if (G4Threading::IsMasterThread())
     {
         auto filetype = meta->GetString("/QR/output/filetype");
@@ -204,31 +204,34 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
         meta->Set("start_time_string", timetostr(starttime));
         meta->Set("runid", run->GetRunID());
 
-        fileName = meta->GetString("/QR/output/filename");
-        if (run->GetRunID() > 0)
-        {
-          fileName += "_run";
-          fileName += std::to_string(run->GetRunID());
-        }
-
-        {
-          auto pos = fileName.find_last_of("/\\");
-          auto start = (pos != G4String::npos) ? pos + 1 : 0;
-          std::replace(fileName.begin() + start, fileName.end(), '.', '-');
-        }
-
         if (filetype == "root") {
             AMan->SetNtupleMerging(meta->Get<bool>("/QR/output/mergeNtuples"));
         }
-
-        HitData::bsWriteDecayAncestors = meta->Get<bool>("/QR/output/writeDecayAncestors");
-        HitData::bsIncludeNonIonizingEdep = meta->Get<bool>("/QR/output/includeNonIonizingEdep");
-
-        bWriteSteps = meta->Get<bool>("/QR/output/writeSteps");
-        bWriteAllEvents = meta->Get<bool>("/QR/output/writeAllEvents");
-        bSort = meta->Get<bool>("/QR/output/sort");
-        _reducebytime::twindow = meta->Get<double>("/QR/output/timeWindow");
     }
+
+    // Shared Configurations (ALL THREADS MUST EXECUTE THIS)
+    // Every thread needs to compute its local fileName and query its own control flags
+    fileName = meta->GetString("/QR/output/filename");
+    if (run->GetRunID() > 0)
+    {
+      fileName += "_run";
+      fileName += std::to_string(run->GetRunID());
+    }
+
+    {
+      auto pos = fileName.find_last_of("/\\");
+      auto start = (pos != G4String::npos) ? pos + 1 : 0;
+      std::replace(fileName.begin() + start, fileName.end(), '.', '-');
+    }
+
+    HitData::bsWriteDecayAncestors = meta->Get<bool>("/QR/output/writeDecayAncestors");
+    HitData::bsIncludeNonIonizingEdep = meta->Get<bool>("/QR/output/includeNonIonizingEdep");
+
+    // CRITICAL: Moving these flags outside allows worker threads to evaluate the loops below correctly!
+    bWriteSteps = meta->Get<bool>("/QR/output/writeSteps");
+    bWriteAllEvents = meta->Get<bool>("/QR/output/writeAllEvents");
+    bSort = meta->Get<bool>("/QR/output/sort");
+    _reducebytime::twindow = meta->Get<double>("/QR/output/timeWindow");
 
     // =================================================================
     // PHASE 2: NTUPLE BOOKING (ALL threads must define identical structures)
@@ -247,17 +250,8 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
       vecDetectors.push_back(det);
       G4String basename = det->GetName();
       
-      if (G4Threading::IsMasterThread()) {
-          G4cout << "DataWriter::RunStart building ntuples for detector " << basename << G4endl;
-      }
+      // Removed the duplicated master metadata block that was here
       
-      if (bWriteSteps || !det->IsReducible())
-      {
-        ntupleid = AMan->CreateNtuple(basename, "Step-by-step energy deposition");
-        HitData::DefineNtuple(AMan, ntupleid, HitData::kFull);
-        AMan->FinishNtuple(ntupleid);
-      }
-
       if (!det->IsReducible())
         continue;
 
@@ -265,19 +259,21 @@ void DataWriter::RunStart(const G4Run *run, bool isMaster)
       {
         const G4String &name = name_reducer.first;
         const DataReducer &reducer = name_reducer.second;
+        
+        // This execution now successfully fires on worker threads because bWriteSteps/bSort are visible!
         ntupleid = AMan->CreateNtuple(basename + "_" + name, name);
         HitData::DefineNtuple(AMan, ntupleid, reducer.reducelvl);
         AMan->FinishNtuple(ntupleid);
       }
     }
 
-    if (G4Threading::IsMasterThread()) {
-        G4cout << "DataWriter::RunStart " << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
-    }
+    // VERIFICATION PRINT: Removed 'if (IsMasterThread)' so you can watch
+    // every active thread report its local ntuple allocation status.
+    G4cout << "Thread [" << G4Threading::G4GetThreadId() << "] DataWriter::RunStart: " 
+           << AMan->GetNofNtuples() << " ntuples are defined" << G4endl;
 
     // =================================================================
     // PHASE 3: FILE OPENING (EVERY thread calls this independently)
-    // For CSV files, Geant4 will automatically append "_t0", "_t1" etc.
     // =================================================================
     auto filetype = meta->GetString("/QR/output/filetype");
     G4String fullFileName = fileName + "." + filetype;
