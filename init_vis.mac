@@ -2,8 +2,15 @@
 # in interactive session
 #
 /QR/output/writeSteps true
+
 # Set some default verbose
 /control/verbose 2
 /control/saveHistory
 /run/verbose 2
-#
+
+# CRITICAL: Tell the multi-threaded run manager to bake the geometry 
+# and sensitive detector mappings BEFORE spawning the GUI session!
+/run/initialize
+
+# Optional: Open the visualizer if your vis.mac commands aren't in main.cc
+# /control/execute vis.mac
