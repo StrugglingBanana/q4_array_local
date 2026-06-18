@@ -74,12 +74,21 @@ int main(int argc, char **argv)
     UImanager->ApplyCommand(command + fileName);
   }
   else
-  {
-    // interactive mode
-    UImanager->ApplyCommand("/control/execute init_vis.mac");
-    ui->SessionStart();
-    delete ui;
-  }
+    {
+      // interactive mode
+      G4int status = UImanager->ApplyCommand("/control/execute init_vis.mac");
+      
+      // Fallback: If init_vis.mac wasn't found in the current working directory,
+      // look in the parent directory (one folder up).
+      if (status != 0)
+      {
+        G4cout << "\n[INFO] init_vis.mac not found in current directory. Trying parent directory..." << G4endl;
+        UImanager->ApplyCommand("/control/execute ../init_vis.mac");
+      }
+
+      ui->SessionStart();
+      delete ui;
+    }
 
   // Job termination
   delete visManager;
