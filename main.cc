@@ -8,7 +8,7 @@
 #include "ActionInitialization.hh"
 
 #include "G4RunManagerFactory.hh"
-#include "G4MTRunManager.hh" // Ensure MT manager header is available
+#include "G4MTRunManager.hh" 
 #include "G4RunManager.hh"
 #include "G4SteppingVerbose.hh"
 #include "G4Version.hh"
@@ -20,14 +20,18 @@
 
 #include "MCSampler.hh"
 
+// C++17 Standard Libraries for Robust Path Resolution
+#include <filesystem>
+#include <iostream>
+
 using namespace QArray;
+namespace fs = std::filesystem;
 
 int main(int argc, char **argv)
 {
   // 1. Instantiate the CORRECT Multi-Threaded Run Manager
 #ifdef G4MULTITHREADED
   auto* runManager = new G4MTRunManager; 
-  // Set the default number of threads (e.g., 4 or your Mac's core count)
   runManager->SetNumberOfThreads(4);
 #else
   auto* runManager = new G4RunManager;
@@ -40,7 +44,7 @@ int main(int argc, char **argv)
     ui = new G4UIExecutive(argc, argv, "Qt"); // Explicitly pass "Qt" for macOS stability
   }
 
-  // use G4SteppingVerboseWithUnits
+  // Use G4SteppingVerboseWithUnits for newer versions
 #if G4VERSION_NUMBER >= 1100
   G4int precision = 4;
   G4SteppingVerbose::UseBestUnit(precision);
@@ -49,7 +53,7 @@ int main(int argc, char **argv)
   // Set mandatory initialization classes
   runManager->SetUserInitialization(new DetectorConstruction());
 
-  // Physics list
+  // Physics list setup
   G4PhysListFactory plFactory;
   G4VModularPhysicsList *physicsList = plFactory.GetReferencePhysList("QBBC_EMV");
   physicsList->SetVerboseLevel(0);
@@ -68,34 +72,55 @@ int main(int argc, char **argv)
   // Process macro or start UI session
   if (!ui)
   {
-    // batch mode
+    // Batch mode execution
     G4String command = "/control/execute ";
     G4String fileName = argv[1];
     UImanager->ApplyCommand(command + fileName);
   }
   else
+  {
+    // Interactive mode execution with modern path validation
+    fs::path macroPath = "init_vis.mac";
+    
+    // Check multiple relative layout targets dynamically
+    if (!fs::exists(macroPath))
     {
-      // interactive mode
-      G4String macroPath = "init_vis.mac";
-      
-      // Check if the file exists in the current directory
-      std::ifstream infile(macroPath);
-      if (!infile.good())
+      if (fs::exists("../init_vis.mac"))
       {
-        G4cout << "\n[INFO] init_vis.mac not found in current directory. Checking parent directory..." << G4endl;
         macroPath = "../init_vis.mac";
       }
-      infile.close();
-
-      // Now execute the guaranteed correct path BEFORE the thread states lock
-      UImanager->ApplyCommand("/control/execute " + macroPath);
-      
-      ui->SessionStart();
-      delete ui;
-    }ui;
+      else if (fs::exists("build/init_vis.mac"))
+      {
+        macroPath = "build/init_vis.mac";
+      }
+      else
+      {
+        // Safe Hard Stop: Prevent cascading zero-ntuple worker segmentation faults
+        G4cerr << "\n========================================================="
+               << "\n [CRITICAL ERROR] Cannot locate 'init_vis.mac'!"
+               << "\n Current Working Directory: " << fs::current_path()
+               << "\n Please ensure the macro exists in the execution path."
+               << "\n=========================================================\n" << G4endl;
+        
+        // Resource cleanup before exiting
+        delete ui;
+        delete visManager;
+        delete runManager;
+        return 1;
+      }
     }
+
+    G4cout << "[INFO] Safely resolved macro path to: " << fs::absolute(macroPath) << G4endl;
+
+    // Execute the guaranteed correct path BEFORE the thread states lock
+    UImanager->ApplyCommand("/control/execute " + macroPath.string());
+    
+    ui->SessionStart();
+    delete ui;
+  }
 
   // Job termination
   delete visManager;
   delete runManager;
+  return 0;
 }

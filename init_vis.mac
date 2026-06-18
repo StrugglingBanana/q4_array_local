@@ -1,6 +1,7 @@
 # Macro file for the initialization of example B1
 # in interactive session
 #
+/QR/output/writeSteps true
 # Set some default verbose
 /control/verbose 2
 /control/saveHistory
