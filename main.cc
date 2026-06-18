@@ -76,18 +76,23 @@ int main(int argc, char **argv)
   else
     {
       // interactive mode
-      G4int status = UImanager->ApplyCommand("/control/execute init_vis.mac");
+      G4String macroPath = "init_vis.mac";
       
-      // Fallback: If init_vis.mac wasn't found in the current working directory,
-      // look in the parent directory (one folder up).
-      if (status != 0)
+      // Check if the file exists in the current directory
+      std::ifstream infile(macroPath);
+      if (!infile.good())
       {
-        G4cout << "\n[INFO] init_vis.mac not found in current directory. Trying parent directory..." << G4endl;
-        UImanager->ApplyCommand("/control/execute ../init_vis.mac");
+        G4cout << "\n[INFO] init_vis.mac not found in current directory. Checking parent directory..." << G4endl;
+        macroPath = "../init_vis.mac";
       }
+      infile.close();
 
+      // Now execute the guaranteed correct path BEFORE the thread states lock
+      UImanager->ApplyCommand("/control/execute " + macroPath);
+      
       ui->SessionStart();
       delete ui;
+    }ui;
     }
 
   // Job termination
